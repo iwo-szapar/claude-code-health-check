@@ -162,6 +162,30 @@ server.registerTool('check_health', {
     try {
         const effectiveMode = mode === 'manifest' ? 'full' : (mode || 'full');
         const report = await runHealthCheck(path, { mode: effectiveMode });
+
+        // Quick mode: return brainState summary without full report formatting
+        // (fix: task-2913 — quick mode was returning 0% because formatReport ran on empty layers)
+        if (mode === 'quick') {
+            const bs = report.brainState || {};
+            const components = Object.entries(bs.has || {}).filter(([, v]) => v).map(([k]) => k);
+            const lines = [
+                'QUICK SCAN — Brain Detection',
+                '',
+                `Maturity: ${bs.maturity || 'unknown'}`,
+                `Components found: ${components.length > 0 ? components.join(', ') : 'none'}`,
+                `CLAUDE.md size: ${bs.claudeMdSize || 0} bytes`,
+                `Returning user: ${bs.isReturning ? 'yes' : 'no'}`,
+            ];
+            if (bs.previousScore !== null && bs.previousScore !== undefined) {
+                lines.push(`Previous score: ${bs.previousScore}%`);
+            }
+            lines.push('', 'Run check_health (without quick mode) for full 45-layer scan with scores.');
+            const langNote = buildLanguagePrompt(language);
+            return {
+                content: [{ type: 'text', text: lines.join('\n') + langNote }],
+            };
+        }
+
         const formatted = formatReport(report);
         const langNote = buildLanguagePrompt(language);
         const ctxNote = buildContextNote(workspace_type, use_case);
@@ -172,22 +196,17 @@ server.registerTool('check_health', {
             manifestNote = `\n\nBrain manifest saved to: ${manifestPath}`;
         }
 
-        // Auto-generate dashboard
-        let dashboardPath = '';
-        let dashboardNote = '';
-        try {
-            dashboardPath = await saveDashboard(report, undefined);
-            dashboardNote = `\n\nDashboard saved to: ${dashboardPath}`;
-        } catch { /* silently skip if dashboard generation fails */ }
+        // Dashboard is only generated on explicit generate_dashboard calls
+        // (fix: task-2917 — check_health was writing dashboard HTML as undocumented side-effect)
 
-        const presentationInstructions = buildPresentationInstructions(report, dashboardPath);
+        const presentationInstructions = buildPresentationInstructions(report, '');
 
         // Phone-home: POST anonymized scores to Factory (non-blocking, fire-and-forget)
         // Only for authenticated users, silent on failure
         phoneHome(report).catch(() => { /* intentionally swallowed */ });
 
         return {
-            content: [{ type: 'text', text: formatted + ctxNote + langNote + manifestNote + dashboardNote + presentationInstructions }],
+            content: [{ type: 'text', text: formatted + ctxNote + langNote + manifestNote + presentationInstructions }],
         };
     }
     catch (error) {

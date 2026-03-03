@@ -90,12 +90,24 @@ async function checkConflicts(rootPath) {
         findings.push({ category: 'conflicts', severity: 'warning', message: `Multiple CLAUDE.md files: ${claudeMdLocations.join(', ')} \u2014 may cause confusion` });
     }
 
-    const settingsContent = await readFileSafe(resolve(rootPath, '.claude', 'settings.json'));
-    if (settingsContent) {
+    // (fix: task-2916 — check both project-level and user-global configs for MCP conflicts)
+    const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+    const configPaths = [
+        resolve(rootPath, '.claude', 'settings.json'),
+        resolve(rootPath, '.claude', 'settings.local.json'),
+    ];
+    if (homeDir) configPaths.push(resolve(homeDir, '.claude.json'));
+
+    const allMcpServers = new Set();
+    for (const configPath of configPaths) {
+        const content = await readFileSafe(configPath);
+        if (!content) continue;
         try {
-            const settings = JSON.parse(settingsContent);
-            if (settings.mcpServers && Object.keys(settings.mcpServers).includes('filesystem')) {
-                findings.push({ category: 'conflicts', severity: 'warning', message: 'MCP \'filesystem\' overlaps with native Read/Write \u2014 adds tool definitions with no benefit in Claude Code' });
+            const settings = JSON.parse(content);
+            if (settings.mcpServers) {
+                for (const name of Object.keys(settings.mcpServers)) {
+                    allMcpServers.add(name);
+                }
             }
             if (settings.hooks) {
                 for (const [event, hookList] of Object.entries(settings.hooks)) {
@@ -109,6 +121,10 @@ async function checkConflicts(rootPath) {
                 }
             }
         } catch {}
+    }
+
+    if (allMcpServers.has('filesystem')) {
+        findings.push({ category: 'conflicts', severity: 'warning', message: 'MCP \'filesystem\' overlaps with native Read/Write \u2014 adds tool definitions with no benefit in Claude Code' });
     }
 
     return findings;
@@ -134,11 +150,19 @@ async function checkSecurity(rootPath) {
         { regex: /xoxb-[a-zA-Z0-9-]{20,}/, label: 'Slack bot token' },
     ];
 
-    for (const file of [
-        { path: 'CLAUDE.md', label: 'CLAUDE.md' },
-        { path: '.claude/settings.json', label: 'settings.json' },
-    ]) {
-        const content = await readFileSafe(resolve(rootPath, file.path));
+    // (fix: task-2916 — scan both project-level and user-global configs for exposed keys)
+    const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+    const filesToScan = [
+        { path: resolve(rootPath, 'CLAUDE.md'), label: 'CLAUDE.md' },
+        { path: resolve(rootPath, '.claude/settings.json'), label: 'settings.json' },
+        { path: resolve(rootPath, '.claude/settings.local.json'), label: 'settings.local.json' },
+    ];
+    if (homeDir) {
+        filesToScan.push({ path: resolve(homeDir, '.claude.json'), label: '~/.claude.json' });
+    }
+
+    for (const file of filesToScan) {
+        const content = await readFileSafe(file.path);
         if (!content) continue;
         for (const check of sensitiveChecks) {
             if (check.regex.test(content)) {
@@ -147,12 +171,20 @@ async function checkSecurity(rootPath) {
         }
     }
 
-    const settingsContent = await readFileSafe(resolve(rootPath, '.claude', 'settings.json'));
-    if (settingsContent) {
+    // Check for overly permissive settings across all config levels
+    const settingsFiles = [
+        resolve(rootPath, '.claude', 'settings.json'),
+        resolve(rootPath, '.claude', 'settings.local.json'),
+    ];
+    if (homeDir) settingsFiles.push(resolve(homeDir, '.claude.json'));
+
+    for (const settingsPath of settingsFiles) {
+        const settingsContent = await readFileSafe(settingsPath);
+        if (!settingsContent) continue;
         try {
             const settings = JSON.parse(settingsContent);
-            if (settings.permissions?.allowedTools) {
-                const allowed = settings.permissions.allowedTools;
+            const allowed = settings.permissions?.allow || settings.permissions?.allowedTools || [];
+            if (Array.isArray(allowed)) {
                 if (allowed.includes('*') || allowed.includes('Bash(*)')) {
                     findings.push({ category: 'security', severity: 'warning', message: 'allowedTools includes wildcard \u2014 all tools run without confirmation' });
                 }
@@ -272,15 +304,25 @@ export async function runAuditConfig(path, checkCategories) {
     try { await access(resolve(rootPath, 'CLAUDE.md')); claudeMdCount++; } catch {}
     try { await access(resolve(rootPath, '.claude', 'CLAUDE.md')); claudeMdCount++; } catch {}
 
-    let mcpCount = 0, toolEstimate = 0, hookCount = 0;
-    const settingsContent = await readFileSafe(resolve(rootPath, '.claude', 'settings.json'));
-    if (settingsContent) {
+    let hookCount = 0;
+    const allMcpServerNames = new Set();
+    const homeDir2 = process.env.HOME || process.env.USERPROFILE || '';
+    const summaryConfigPaths = [
+        resolve(rootPath, '.claude', 'settings.json'),
+        resolve(rootPath, '.claude', 'settings.local.json'),
+    ];
+    if (homeDir2) summaryConfigPaths.push(resolve(homeDir2, '.claude.json'));
+    for (const cfgPath of summaryConfigPaths) {
+        const cfgContent = await readFileSafe(cfgPath);
+        if (!cfgContent) continue;
         try {
-            const settings = JSON.parse(settingsContent);
-            if (settings.mcpServers) { mcpCount = Object.keys(settings.mcpServers).length; toolEstimate = mcpCount * 5; }
-            if (settings.hooks) { hookCount = Object.values(settings.hooks).flat().length; }
+            const cfg = JSON.parse(cfgContent);
+            if (cfg.mcpServers) { for (const name of Object.keys(cfg.mcpServers)) allMcpServerNames.add(name); }
+            if (cfg.hooks) { hookCount += Object.values(cfg.hooks).flat().length; }
         } catch {}
     }
+    const mcpCount = allMcpServerNames.size;
+    const toolEstimate = mcpCount * 5;
 
     const skillFiles = await getMdFiles(resolve(rootPath, '.claude', 'skills'));
     const agentFiles = await getMdFiles(resolve(rootPath, '.claude', 'agents'));

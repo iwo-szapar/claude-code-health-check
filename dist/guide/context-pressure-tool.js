@@ -30,10 +30,33 @@ export async function runContextPressure(path) {
     totalFixed += claudeMdTokens;
 
     // 2. MEMORY.md
+    // (fix: task-2915 — also check Claude Code project-level auto-memory path)
     let memoryContent = null;
-    for (const memPath of ['memory/MEMORY.md', '.claude/memory/MEMORY.md', 'MEMORY.md']) {
-        memoryContent = await readFileSafe(resolve(rootPath, memPath));
-        if (memoryContent) break;
+    const memorySearchPaths = ['memory/MEMORY.md', '.claude/memory/MEMORY.md', 'MEMORY.md'];
+    // Claude Code stores project-level auto-memory at ~/.claude/projects/{hash}/memory/MEMORY.md
+    const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+    if (homeDir) {
+        const { readdir: readdirFs } = await import('node:fs/promises');
+        const projectsDir = resolve(homeDir, '.claude', 'projects');
+        try {
+            const projectDirs = await readdirFs(projectsDir, { withFileTypes: true });
+            for (const d of projectDirs) {
+                if (d.isDirectory()) {
+                    const candidatePath = resolve(projectsDir, d.name, 'memory', 'MEMORY.md');
+                    const candidate = await readFileSafe(candidatePath);
+                    if (candidate) {
+                        memoryContent = candidate;
+                        break;
+                    }
+                }
+            }
+        } catch { /* no projects dir */ }
+    }
+    if (!memoryContent) {
+        for (const memPath of memorySearchPaths) {
+            memoryContent = await readFileSafe(resolve(rootPath, memPath));
+            if (memoryContent) break;
+        }
     }
     const memoryTokens = memoryContent ? estimateTokens(memoryContent.length) : 0;
     const memoryLines = memoryContent ? memoryContent.split('\n').length : 0;
@@ -69,17 +92,30 @@ export async function runContextPressure(path) {
     }
 
     // 4. MCP tools
+    // (fix: task-2914 — also read user-global ~/.claude.json where MCP servers are typically configured)
     let mcpToolCount = 0;
     let mcpServerCount = 0;
-    for (const settingsPath of ['.claude/settings.json', '.claude/settings.local.json']) {
-        const content = await readFileSafe(resolve(rootPath, settingsPath));
+    const mcpConfigPaths = [
+        resolve(rootPath, '.claude/settings.json'),
+        resolve(rootPath, '.claude/settings.local.json'),
+    ];
+    if (homeDir) {
+        mcpConfigPaths.push(resolve(homeDir, '.claude.json'));
+    }
+    const seenServers = new Set();
+    for (const configPath of mcpConfigPaths) {
+        const content = await readFileSafe(configPath);
         if (content) {
             try {
                 const settings = JSON.parse(content);
                 if (settings.mcpServers) {
-                    const count = Object.keys(settings.mcpServers).length;
-                    mcpServerCount += count;
-                    mcpToolCount += count * 5;
+                    for (const name of Object.keys(settings.mcpServers)) {
+                        if (!seenServers.has(name)) {
+                            seenServers.add(name);
+                            mcpServerCount++;
+                            mcpToolCount += 5; // estimate ~5 tools per server
+                        }
+                    }
                 }
             } catch { /* invalid JSON */ }
         }
