@@ -80,7 +80,7 @@ export async function checkEnvVars(rootPath) {
 
             if (trackedEnvFiles.length > 0) {
                 status = 'fail'; points = 0;
-                message = `${trackedEnvFiles.length} env file(s) tracked in git: ${trackedEnvFiles.join(', ')} — add to .gitignore and rotate secrets`;
+                message = `${trackedEnvFiles.length} secret file(s) visible in your repository: ${trackedEnvFiles.join(', ')}. Why it matters: these files contain passwords and API keys — anyone with repo access can see them. Fix: add .env* to .gitignore, then change any passwords or keys that were exposed.`;
             } else {
                 const gitignore = await readText(join(rootPath, '.gitignore'));
                 const hasEnvIgnore = gitignore && (
@@ -100,7 +100,7 @@ export async function checkEnvVars(rootPath) {
                     message = `${envFilesExist.length} env file(s) present and .gitignore includes .env patterns`;
                 } else {
                     status = 'warn'; points = 2;
-                    message = `${envFilesExist.length} env file(s) present but .gitignore may not cover them — verify .env is gitignored`;
+                    message = `${envFilesExist.length} secret file(s) found but may not be protected from sharing. Tip: add .env* to your .gitignore file to keep secrets private.`;
                 }
             }
         }

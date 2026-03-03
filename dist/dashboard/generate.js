@@ -192,6 +192,15 @@ const LAYER_DESCRIPTIONS = {
     'Delegation Patterns': 'Evidence that you\'re using Claude for complex multi-step tasks, not just one-shot questions.',
     'Interview & Spec Patterns': 'Evidence that Claude asks clarifying questions before starting work, and creates specs before building.',
     'Compound Evidence': 'Signs that each session builds on previous ones — growing memory, evolving patterns, maturing skills.',
+    'Directory Structure': 'How your files and folders are organized. Good structure helps Claude find things fast without reading everything.',
+    'Personalization Depth': 'How well your setup reflects YOUR specific role, industry, and workflow — not a generic template.',
+    'Team Readiness': 'Whether your setup supports multiple Claude instances working together on shared projects.',
+    'Workflow Maturity': 'How sophisticated your automated workflows are — from basic skills to multi-step command chains.',
+    'Memory Evolution': 'Whether your memory files change over time. A growing memory means the brain is actually learning.',
+    'Gitignore Hygiene': 'Whether sensitive files (passwords, API keys, personal settings) are protected from accidentally being shared.',
+    'Environment Variables': 'Configuration for API keys, performance settings, and backend selection. Misconfiguration can cause failures or security issues.',
+    'CLAUDE.md Quality': 'Your CLAUDE.md is the brain\'s instruction manual. Quality = clear structure, useful references, not too long, not too short.',
+    'Model Configuration': 'Which AI model Claude uses and how it\'s configured — affects cost, speed, and capability.',
 };
 
 function getLayerDescription(layerName) {
@@ -309,6 +318,69 @@ function renderTopFixes(fixes) {
     </div>`;
 }
 
+function renderUpgradePanel(report) {
+    const overallPct = Math.round(
+        (report.setup.normalizedScore + report.usage.normalizedScore + (report.fluency?.normalizedScore || 0)) /
+        (report.fluency ? 3 : 2)
+    );
+    const topFixes = report.topFixes || [];
+    if (overallPct === 0 || overallPct >= 85 || topFixes.length === 0) return '';
+
+    const isBuyer = report.brainState?.isBuyer || false;
+    const highFixes = topFixes.filter(f => f.impact === 'high');
+    const medFixes = topFixes.filter(f => f.impact === 'medium');
+    const lowFixes = topFixes.filter(f => f.impact === 'low');
+
+    const estimatedFiles = Math.max(
+        highFixes.length * 2 + medFixes.length + Math.ceil(lowFixes.length / 2),
+        1
+    );
+    const delta = Math.min(highFixes.length * 4 + medFixes.length * 2 + lowFixes.length, 30);
+    const projected = Math.min(overallPct + delta, 95);
+
+    const fileItems = topFixes.slice(0, 4).map(fix => `
+        <div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid rgba(0,0,0,.1);">
+            <span style="width:7px;height:7px;border-radius:50%;background:${fix.impact === 'high' ? '#000' : '#999'};flex-shrink:0;"></span>
+            <span style="font-size:11px;color:#000;font-family:'Space Mono',monospace;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(fix.title)}</span>
+            <span style="font-size:9px;font-weight:700;padding:2px 5px;border:2px solid ${fix.impact === 'high' ? '#000' : '#999'};color:${fix.impact === 'high' ? '#000' : '#999'};text-transform:uppercase;letter-spacing:.06em;flex-shrink:0;font-family:'Space Mono',monospace;">${escapeHtml(fix.impact)}</span>
+        </div>`).join('');
+
+    const moreHtml = topFixes.length > 4
+        ? `<p style="font-size:10px;color:#999;margin:8px 0 0;font-family:'Space Mono',monospace;">+ ${topFixes.length - 4} more fixes</p>`
+        : '';
+
+    const ctaHtml = isBuyer
+        ? `<div style="margin-top:16px;">
+            <div style="font-size:10px;color:#595959;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;font-family:'Space Mono',monospace;">Run in Claude Code</div>
+            <code style="display:block;background:#f5f5f5;padding:10px 14px;font-size:12px;border:2px solid #000;font-family:'Space Mono',monospace;cursor:pointer;" title="Click to copy" onclick="navigator.clipboard.writeText('upgrade_brain')">upgrade_brain</code>
+            <code style="display:block;background:#f5f5f5;padding:8px 14px;font-size:12px;border:2px solid #e0e0e0;border-top:none;font-family:'Space Mono',monospace;cursor:pointer;color:#595959;" title="Click to copy" onclick="navigator.clipboard.writeText('upgrade_brain dry-run')">upgrade_brain dry-run</code>
+           </div>`
+        : `<div style="margin-top:16px;">
+            <a href="https://www.iwoszapar.com/memory-os" style="display:block;padding:13px 20px;background:#000;color:#fff;text-align:center;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.12em;text-decoration:none;border:4px solid #000;font-family:'Space Mono',monospace;" class="hover-brutal">Unlock upgrade_brain &rarr;</a>
+            <p style="font-size:10px;color:#999;margin:8px 0 0;text-align:center;font-family:'Space Mono',monospace;">memory-os &middot; $99/yr</p>
+           </div>`;
+
+    return `
+    <div style="border:4px solid #000;margin-top:28px;overflow:hidden;background:#fff;">
+        <div style="background:#000;padding:13px 20px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+            <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.15em;color:#fff;font-family:'Space Mono',monospace;">Upgrade Available</span>
+            <span style="font-size:14px;font-weight:700;color:#fff;font-family:'DM Sans',sans-serif;">${overallPct}%&nbsp;&nbsp;<span style="opacity:.4;">&#8594;</span>&nbsp;&nbsp;${projected}%&nbsp;<span style="opacity:.5;font-size:11px;font-weight:400;">(+${projected - overallPct}&nbsp;pts)</span></span>
+        </div>
+        <div class="upgrade-grid" style="padding:20px;display:grid;grid-template-columns:1fr 1fr;gap:28px;">
+            <div>
+                <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#595959;margin-bottom:12px;font-family:'Space Mono',monospace;">${estimatedFiles} files ready to generate</div>
+                ${fileItems}
+                ${moreHtml}
+            </div>
+            <div>
+                <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#595959;margin-bottom:12px;font-family:'Space Mono',monospace;">Personalized for your brain</div>
+                <p style="font-size:12px;color:#595959;line-height:1.75;margin:0;">upgrade_brain compares your brain to the ideal state for your tier, generates the missing files with your profile data, and applies on your confirmation.</p>
+                ${ctaHtml}
+            </div>
+        </div>
+    </div>`;
+}
+
 function renderRadarChart(cePatterns) {
     const cx = 200, cy = 160, r = 100;
     const n = cePatterns.length;
@@ -381,7 +453,7 @@ function renderCEPatterns(cePatterns) {
     <div style="border:4px solid #000;margin-top:32px;overflow:hidden;background:#fff;">
         <div style="background:#000;padding:14px 20px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.15em;color:#fff;font-family:'Space Mono',monospace;">Context Engineering Patterns</div>
         <div style="padding:16px 20px;">
-            <div style="font-size:12px;color:#595959;margin-bottom:12px;font-family:'DM Sans',sans-serif;">How well your brain implements the 7 Context Engineering patterns.</div>
+            <div style="font-size:12px;color:#595959;margin-bottom:12px;font-family:'DM Sans',sans-serif;">Context Engineering (CE) = the practice of designing what AI knows about you and your work. These 7 patterns determine how effectively your AI assistant can help you.</div>
             ${radarSvg}
             ${patternsHtml}
         </div>
@@ -391,10 +463,10 @@ function renderCEPatterns(cePatterns) {
 function renderJourneyStage(overallPct) {
     const stages = [
         { min: 0,  label: 'BLANK SLATE',     desc: 'You have a repo. Not much else.' },
-        { min: 30, label: 'SCAFFOLDED',       desc: 'Structure exists. Skills are configured.' },
-        { min: 50, label: 'PRACTICING',       desc: 'Daily usage. Patterns starting to form.' },
-        { min: 70, label: 'COMPOUNDING',      desc: 'Memory grows between sessions. AI knows your context.' },
-        { min: 85, label: 'PRODUCTION-GRADE', desc: 'Self-improving system. Hooks, reviews, compound loops.' },
+        { min: 25, label: 'SCAFFOLDED',       desc: 'Structure exists. CLAUDE.md and skills configured.' },
+        { min: 55, label: 'PRACTICING',       desc: 'Regular usage. Patterns starting to form.' },
+        { min: 72, label: 'COMPOUNDING',      desc: 'Memory grows between sessions. AI knows your context.' },
+        { min: 88, label: 'PRODUCTION-GRADE', desc: 'Self-improving system. Hooks, reviews, compound loops.' },
     ];
 
     let currentIdx = 0;
@@ -513,6 +585,7 @@ export function generateDashboardHtml(report) {
     .score-panel{grid-template-columns:1fr!important}
     .score-right{border-left:none!important;border-top:4px solid #000!important}
     .big-num{font-size:72px!important}
+    .upgrade-grid{grid-template-columns:1fr!important}
     .term-row div:first-child{grid-template-columns:14px 1fr 60px 36px!important}
   }
 </style>
@@ -594,6 +667,9 @@ export function generateDashboardHtml(report) {
     <!-- Top Fixes -->
     ${renderTopFixes(report.topFixes)}
 
+    <!-- Upgrade Panel -->
+    ${renderUpgradePanel(report)}
+
     <!-- CE Patterns -->
     ${renderCEPatterns(report.cePatterns)}
 
@@ -618,9 +694,9 @@ export function generateDashboardHtml(report) {
         <a href="https://www.iwoszapar.com/teams" class="hover-brutal" style="display:inline-block;padding:14px 40px;background:#fff;color:#000;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.12em;text-decoration:none;border:4px solid #fff;font-family:'Space Mono',monospace;">Explore Team Brain</a>
     </div>`
         : `<div style="background:#000;border:4px solid #000;padding:44px 40px;text-align:center;margin-top:32px;margin-bottom:32px;">
-        <div style="font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:rgba(255,255,255,.6);margin-bottom:16px;font-family:'Space Mono',monospace;">The fastest way to production-grade</div>
-        <p style="font-size:13px;color:rgba(255,255,255,.5);margin-bottom:24px;line-height:1.7;max-width:520px;margin:0 auto;">You could fix everything on this report yourself. It would take weeks of trial and error. Or you could start with a Second Brain that already scores 85+ out of the box &mdash; pre-configured with skills, hooks, memory systems, and knowledge architecture built for how you actually work.</p>
-        <a href="https://www.iwoszapar.com/second-brain-ai" class="hover-brutal" style="display:inline-block;padding:14px 40px;background:#fff;color:#000;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.12em;text-decoration:none;border:4px solid #fff;font-family:'Space Mono',monospace;">Get your Second Brain</a>
+        <div style="font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:rgba(255,255,255,.6);margin-bottom:16px;font-family:'Space Mono',monospace;">Let the tool do the work</div>
+        <p style="font-size:13px;color:rgba(255,255,255,.5);margin-bottom:24px;line-height:1.7;max-width:520px;margin:0 auto;">upgrade_brain reads your health check, pulls the right templates for your tier, personalizes every file with your profile, and writes them to your brain on confirmation. See the panel above for what it would do.</p>
+        <a href="https://www.iwoszapar.com/memory-os" class="hover-brutal" style="display:inline-block;padding:14px 40px;background:#fff;color:#000;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.12em;text-decoration:none;border:4px solid #fff;font-family:'Space Mono',monospace;">Unlock upgrade_brain &rarr;</a>
     </div>`
     }
 
@@ -641,9 +717,7 @@ export async function saveDashboard(report, outputPath) {
     if (!homeDir) {
         throw new Error('Cannot determine home directory: HOME environment variable is not set.');
     }
-    const nrFile = filePath.replace(/\\/g, '/');
-    const nhFile = homeDir.replace(/\\/g, '/');
-    if (!nrFile.startsWith(nhFile + '/') && nrFile !== nhFile) {
+    if (!filePath.startsWith(homeDir + '/') && filePath !== homeDir) {
         throw new Error(`Output path "${filePath}" is outside the home directory.`);
     }
     await writeFile(filePath, html, 'utf-8');

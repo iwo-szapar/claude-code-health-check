@@ -93,7 +93,8 @@ MCP Server:
 
     // Privacy notice — printed once before analysis begins
     process.stderr.write(
-        '\nRuns entirely locally. Zero network calls. Zero telemetry.\n' +
+        '\nHealth check runs entirely locally. Zero telemetry.\n' +
+        'Paid features (Guide MCP) connect to the Guide server for onboarding and optimization.\n' +
         'Reads file structure and config metadata — never logs, stores, or transmits secret values.\n' +
         'Secret detection reports "found/not found" only — your actual keys are never shown in output.\n\n'
     );

@@ -43,6 +43,16 @@ const EXCLUDE_PATTERNS = [
     /^integrations\//,      // integration paths
     /^[^/]+\.sh$/,          // bare script names without path (hook references)
     /^[^/]+\.py$/,          // bare Python script names
+    // --- False positive filters (task-2606) ---
+    /^[A-Z][a-zA-Z]+\.md$/,// Capitalized filenames used as labels (e.g. "SKILL.md", "README.md")
+    /^[A-Z]+\.md$/,         // ALL-CAPS .md names used as references to concepts, not paths
+    /\*/,                   // Glob patterns like "*.js" or "**/*.ts"
+    /^[a-z]+-[a-z]+-[a-z]+\//,  // deeply-kebab-case slug paths (3+ segments, e.g. "my-cool-project/")
+    /^\w+\.(?:env|lock|log|gitignore|dockerignore|prettierrc|eslintrc)$/i,  // Config file names
+    /^\.env/,               // .env files
+    /^personal\//,          // personal directory paths
+    /^blog\//,              // blog content paths
+    /^growth\//,            // growth directory paths
 ];
 
 // Stricter path patterns for skills — only match references to documentation-like files
@@ -153,12 +163,16 @@ export async function checkReferenceIntegrity(rootPath) {
                     }
                 }
 
-                // Sort broken refs: relative paths first (most likely to break on rename)
+                // Sort broken refs: relative paths first (most actionable — break on rename)
+                // Then by path depth (deeper = more likely intentional reference)
                 broken.sort((a, b) => {
-                    const aRel = a.startsWith('./') || a.startsWith('../');
-                    const bRel = b.startsWith('./') || b.startsWith('../');
-                    return bRel - aRel;
+                    const aRel = a.startsWith('./') || a.startsWith('../') ? 0 : 1;
+                    const bRel = b.startsWith('./') || b.startsWith('../') ? 0 : 1;
+                    if (aRel !== bRel) return aRel - bRel;
+                    return (b.split('/').length) - (a.split('/').length);
                 });
+
+                const relBroken = broken.filter(b => b.startsWith('./') || b.startsWith('../'));
 
                 let status, points, message;
                 if (broken.length === 0) {
@@ -166,10 +180,16 @@ export async function checkReferenceIntegrity(rootPath) {
                     message = `All ${refs.length} file references in CLAUDE.md resolve to real paths`;
                 } else if (broken.length <= 3) {
                     status = 'warn'; points = 3;
-                    message = `${broken.length}/${refs.length} broken references: ${broken.slice(0, 3).join(', ')}`;
+                    const relNote = relBroken.length > 0
+                        ? ` (${relBroken.length} relative path${relBroken.length > 1 ? 's' : ''} — fix these first, they break on renames)`
+                        : '';
+                    message = `${broken.length}/${refs.length} broken references${relNote}: ${broken.slice(0, 3).join(', ')}`;
                 } else {
                     status = 'fail'; points = 1;
-                    message = `${broken.length}/${refs.length} references are broken: ${broken.slice(0, 3).join(', ')} — Claude will waste tokens looking for these`;
+                    const relNote = relBroken.length > 0
+                        ? ` Start with ${relBroken.length} relative path${relBroken.length > 1 ? 's' : ''} — they break silently on renames.`
+                        : '';
+                    message = `${broken.length}/${refs.length} references are broken.${relNote} Top issues: ${broken.slice(0, 3).join(', ')}`;
                 }
                 checks.push({ name: 'CLAUDE.md references resolve', status, points, maxPoints: 5, message });
             }
@@ -221,11 +241,12 @@ export async function checkReferenceIntegrity(rootPath) {
                 }
             }
 
-            // Sort broken examples: relative paths first
+            // Sort broken examples: relative paths first, then by path depth
             brokenExamples.sort((a, b) => {
-                const aRel = a.startsWith('./') || a.startsWith('../');
-                const bRel = b.startsWith('./') || b.startsWith('../');
-                return bRel - aRel;
+                const aRel = a.startsWith('./') || a.startsWith('../') ? 0 : 1;
+                const bRel = b.startsWith('./') || b.startsWith('../') ? 0 : 1;
+                if (aRel !== bRel) return aRel - bRel;
+                return (b.split('/').length) - (a.split('/').length);
             });
 
             let status, points, message;

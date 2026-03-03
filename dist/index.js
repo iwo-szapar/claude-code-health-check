@@ -14,18 +14,22 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { runHealthCheck, detectBrainState } from './health-check.js';
-import { formatReport, formatFixSuggestions, formatQuickReport } from './report-formatter.js';
+import { formatReport, formatFixSuggestions } from './report-formatter.js';
 import { generateDashboardHtml, saveDashboard } from './dashboard/generate.js';
 import { generatePdf } from './tools/generate-pdf.js';
 import { generateManifestYaml, saveManifest } from './brain-manifest.js';
 import { runWeeklyPulse } from './guide/weekly-pulse.js';
 import { runContextPressure } from './guide/context-pressure-tool.js';
 import { runAuditConfig } from './guide/audit-config.js';
+import { runImportContext } from './tools/import-context.js';
+import { runUpgradeBrain } from './tools/upgrade-brain.js';
+import { phoneHome } from './guide/phone-home.js';
 import { VERSION } from './version.js';
 function buildPresentationInstructions(report, dashboardPath) {
-    const totalMax = (report.setup?.maxPoints || 0) + (report.usage?.maxPoints || 0) + (report.fluency?.maxPoints || 0);
-    const totalPts = (report.setup?.totalPoints || 0) + (report.usage?.totalPoints || 0) + (report.fluency?.totalPoints || 0);
-    const overall = totalMax > 0 ? Math.round((totalPts / totalMax) * 100) : 0;
+    const overall = report.setup && report.usage
+        ? Math.round(((report.setup.totalPoints + report.usage.totalPoints + (report.fluency?.totalPoints || 0)) /
+            (report.setup.maxPoints + report.usage.maxPoints + (report.fluency?.maxPoints || 0))) * 100)
+        : 0;
     const setup = report.setup?.normalizedScore ?? 0;
     const setupGrade = report.setup?.gradeLabel ?? '';
     const usage = report.usage?.normalizedScore ?? 0;
@@ -158,18 +162,9 @@ server.registerTool('check_health', {
     try {
         const effectiveMode = mode === 'manifest' ? 'full' : (mode || 'full');
         const report = await runHealthCheck(path, { mode: effectiveMode });
+        const formatted = formatReport(report);
         const langNote = buildLanguagePrompt(language);
         const ctxNote = buildContextNote(workspace_type, use_case);
-
-        // Quick mode: return detection-only report, skip dashboard/presentation
-        if (effectiveMode === 'quick') {
-            const formatted = formatQuickReport(report, language);
-            return {
-                content: [{ type: 'text', text: formatted + ctxNote + langNote }],
-            };
-        }
-
-        const formatted = formatReport(report, language);
 
         let manifestNote = '';
         if (mode === 'manifest') {
@@ -186,6 +181,10 @@ server.registerTool('check_health', {
         } catch { /* silently skip if dashboard generation fails */ }
 
         const presentationInstructions = buildPresentationInstructions(report, dashboardPath);
+
+        // Phone-home: POST anonymized scores to Factory (non-blocking, fire-and-forget)
+        // Only for authenticated users, silent on failure
+        phoneHome(report).catch(() => { /* intentionally swallowed */ });
 
         return {
             content: [{ type: 'text', text: formatted + ctxNote + langNote + manifestNote + dashboardNote + presentationInstructions }],
@@ -309,11 +308,11 @@ function requireGuideToken() {
         return {
             content: [{
                 type: 'text',
-                text: 'This tool requires Second Brain Guide.\n\n' +
-                    'Get access: https://www.iwoszapar.com/context-engineering\n\n' +
-                    'Already purchased? Add your token:\n' +
-                    '  Add SBF_TOKEN to .claude/settings.json env block\n' +
-                    '  Or: export SBF_TOKEN=sbf_xxxx'
+                text: 'This tool requires a Second Brain Guide account.\n\n' +
+                    'Get access: https://www.iwoszapar.com/second-brain-ai\n\n' +
+                    'Already purchased? Run the setup command:\n' +
+                    '  npx second-brain-health-check setup\n\n' +
+                    'This will configure your account and unlock paid tools.'
             }],
             isError: true,
         };
@@ -338,6 +337,21 @@ server.registerTool('weekly_pulse', {
 }, async ({ period, path }) => {
     const gate = requireGuideToken();
     if (gate) return gate;
+    // Deprecation notice — flip to true when remote Guide MCP weekly_pulse ships
+    const REMOTE_WEEKLY_PULSE_AVAILABLE = false;
+    if (REMOTE_WEEKLY_PULSE_AVAILABLE) {
+        return {
+            content: [{
+                type: 'text',
+                text: 'weekly_pulse has moved to the Guide MCP server for better tracking and cross-session insights.\n\n' +
+                    'The remote version uses server-side history instead of local .health-check.json, ' +
+                    'giving you accurate deltas even across machines.\n\n' +
+                    'To use it, make sure your Guide MCP is configured:\n' +
+                    '  npx second-brain-health-check setup\n\n' +
+                    'Then call weekly_pulse through the Guide MCP instead of this local tool.',
+            }],
+        };
+    }
     try {
         return await runWeeklyPulse(period, path);
     } catch (error) {
@@ -391,6 +405,151 @@ server.registerTool('audit_config', {
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         return { content: [{ type: 'text', text: `Config audit failed: ${message}` }], isError: true };
+    }
+});
+
+// Tool 8: import_context
+server.registerTool('import_context', {
+    description: 'Import conversation history from ChatGPT or Claude exports into your Second Brain memory structure. ' +
+        'Scans exports, extracts topics and patterns, and creates organized memory files. ' +
+        'Use scan mode first to preview, then import mode to create files. ' +
+        'ChatGPT: point to conversations.json. Claude: point to the export directory.',
+    inputSchema: {
+        source_type: z
+            .enum(['chatgpt_export', 'claude_export'])
+            .describe("Export source type. 'chatgpt_export' for conversations.json file, " +
+            "'claude_export' for directory of per-conversation JSON files."),
+        source_path: z
+            .string()
+            .max(4096)
+            .refine((p) => !p.includes('\0'), 'Path must not contain null bytes')
+            .describe('Path to export file (ChatGPT) or directory (Claude).'),
+        mode: z
+            .enum(['scan', 'import'])
+            .optional()
+            .describe("'scan' (default) analyzes without writing files. " +
+            "'import' creates organized memory files from conversations."),
+        output_dir: z
+            .string()
+            .max(4096)
+            .optional()
+            .describe('Where to write imported files. Default: memory/imported/'),
+        max_conversations: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe('Limit number of conversations to process. Useful for large exports.'),
+        min_messages: z
+            .number()
+            .int()
+            .nonnegative()
+            .optional()
+            .describe('Skip conversations with fewer user messages than this. Default: 3.'),
+        date_after: z
+            .string()
+            .optional()
+            .describe('Only include conversations created after this ISO date (e.g. 2024-01-01).'),
+        date_before: z
+            .string()
+            .optional()
+            .describe('Only include conversations created before this ISO date.'),
+        categories: z
+            .array(z.string())
+            .optional()
+            .describe('Filter by detected category (coding, writing, research, planning, data, creative, operations).'),
+        merge_existing: z
+            .boolean()
+            .optional()
+            .describe('When true, writes to memory/semantic/ instead of memory/imported/. Default: false.'),
+        language: z
+            .enum(SUPPORTED_LANGUAGES)
+            .optional()
+            .describe('Language for the output. Defaults to English (en).'),
+    },
+}, async ({ source_type, source_path, mode, output_dir, max_conversations, min_messages,
+           date_after, date_before, categories, merge_existing, language }) => {
+    const gate = requireGuideToken();
+    if (gate) return gate;
+    try {
+        const result = await runImportContext({
+            source: { type: source_type, path: source_path },
+            mode: mode || 'scan',
+            options: {
+                output_dir,
+                max_conversations,
+                min_messages,
+                date_range: (date_after || date_before) ? { after: date_after, before: date_before } : undefined,
+                categories,
+                merge_existing
+            },
+            language,
+            projectRoot: process.cwd()
+        });
+        const langNote = buildLanguagePrompt(language);
+        return {
+            content: [{ type: 'text', text: JSON.stringify(result, null, 2) + langNote }],
+        };
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+            content: [{ type: 'text', text: `Import context failed: ${message}` }],
+            isError: true,
+        };
+    }
+});
+
+// Tool 9: upgrade_brain
+server.registerTool('upgrade_brain', {
+    description: 'Identify missing and outdated files in your Second Brain and generate personalized upgrades. ' +
+        'Runs health check + brain inventory locally (Phases 1-3), then calls the Factory API for template ' +
+        'diff and personalization (Phases 4-6). Returns a prioritized list of files to add/update with ' +
+        'personalized content and a projected score improvement. ' +
+        'Use after /upgrade-brain skill in Claude Code to apply the generated files. ' +
+        'Requires UPGRADE_BRAIN_API_KEY env var (MemoryOS subscriber benefit).',
+    inputSchema: {
+        path: pathSchema
+            .describe('Path to the Second Brain root directory. Defaults to current working directory.'),
+        high_only: z
+            .boolean()
+            .optional()
+            .describe('If true, only return HIGH impact files. Default: false (returns all).'),
+        category: z
+            .string()
+            .optional()
+            .describe('Filter to a specific category: agent, skill, memory, config, docs.'),
+        dry_run: z
+            .boolean()
+            .optional()
+            .describe('If true, return the diff plan without calling apply. Default: false.'),
+        factory_url: z
+            .string()
+            .url()
+            .optional()
+            .describe('Override the Factory API URL. Default: https://www.iwoszapar.com/api/upgrade/generate'),
+        api_key: z
+            .string()
+            .optional()
+            .describe('API key for the Factory endpoint. Falls back to UPGRADE_BRAIN_API_KEY env var.'),
+    },
+}, async ({ path, high_only, category, dry_run, factory_url, api_key }) => {
+    try {
+        const result = await runUpgradeBrain({ path, high_only, category, dry_run, factory_url, api_key });
+        const summary = result._summary || '';
+        const outputData = { ...result };
+        delete outputData._summary;
+        return {
+            content: [
+                { type: 'text', text: summary },
+                { type: 'text', text: '\n\n```json\n' + JSON.stringify(outputData, null, 2) + '\n```' },
+            ],
+        };
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+            content: [{ type: 'text', text: `Upgrade brain failed: ${message}` }],
+            isError: true,
+        };
     }
 });
 

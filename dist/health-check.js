@@ -264,9 +264,7 @@ export async function runHealthCheck(path, options = {}) {
     if (!homeDir) {
         throw new Error('Cannot determine home directory: HOME environment variable is not set.');
     }
-    const nrRoot = rootPath.replace(/\\/g, '/');
-    const nhRoot = homeDir.replace(/\\/g, '/');
-    if (!nrRoot.startsWith(nhRoot + '/') && nrRoot !== nhRoot) {
+    if (!rootPath.startsWith(homeDir + '/') && rootPath !== homeDir) {
         throw new Error(`Path "${rootPath}" is outside the home directory.`);
     }
     // Ensure path is a directory

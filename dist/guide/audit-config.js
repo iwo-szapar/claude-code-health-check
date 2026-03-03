@@ -6,7 +6,6 @@
  */
 import { readdir, access } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
-import { homedir } from 'node:os';
 import { resolveProjectRoot, readFileSafe, getMdFiles } from './utils.js';
 
 const ALL_CATEGORIES = ['references', 'conflicts', 'security', 'unused', 'performance'];
@@ -117,9 +116,7 @@ async function checkConflicts(rootPath) {
 
 async function checkSecurity(rootPath) {
     const findings = [];
-    const home = homedir();
 
-    // 1. .gitignore checks
     const gitignore = await readFileSafe(resolve(rootPath, '.gitignore'));
     if (gitignore) {
         if (!gitignore.includes('.env')) {
@@ -129,36 +126,19 @@ async function checkSecurity(rootPath) {
         findings.push({ category: 'security', severity: 'warning', message: 'No .gitignore found \u2014 secrets may be committed' });
     }
 
-    // 2. Scan for sensitive token patterns across all relevant files
+    // Scan for sensitive token patterns (long alphanumeric prefixed strings)
     const sensitiveChecks = [
         { regex: /sk-[a-zA-Z0-9]{20,}/, label: 'OpenAI API key' },
         { regex: /sk-ant-[a-zA-Z0-9]{20,}/, label: 'Anthropic API key' },
         { regex: /ghp_[a-zA-Z0-9]{20,}/, label: 'GitHub personal access token' },
         { regex: /xoxb-[a-zA-Z0-9-]{20,}/, label: 'Slack bot token' },
-        { regex: /key-[a-zA-Z0-9]{20,}/, label: 'API key' },
-        { regex: /eyJ[a-zA-Z0-9._-]{40,}/, label: 'JWT token' },
     ];
 
-    const filesToScan = [
-        { path: resolve(rootPath, 'CLAUDE.md'), label: 'CLAUDE.md' },
-        { path: resolve(rootPath, '.claude/settings.json'), label: 'settings.json' },
-        { path: resolve(rootPath, '.mcp.json'), label: '.mcp.json' },
-        { path: resolve(rootPath, '.claude.json'), label: '.claude.json (project)' },
-        { path: join(home, '.claude.json'), label: '~/.claude.json' },
-    ];
-
-    // Also scan .mcp/ directory if it exists
-    try {
-        const mcpDirEntries = await readdir(resolve(rootPath, '.mcp'));
-        for (const entry of mcpDirEntries) {
-            if (entry.endsWith('.json')) {
-                filesToScan.push({ path: resolve(rootPath, '.mcp', entry), label: `.mcp/${entry}` });
-            }
-        }
-    } catch { /* no .mcp/ dir */ }
-
-    for (const file of filesToScan) {
-        const content = await readFileSafe(file.path);
+    for (const file of [
+        { path: 'CLAUDE.md', label: 'CLAUDE.md' },
+        { path: '.claude/settings.json', label: 'settings.json' },
+    ]) {
+        const content = await readFileSafe(resolve(rootPath, file.path));
         if (!content) continue;
         for (const check of sensitiveChecks) {
             if (check.regex.test(content)) {
@@ -167,7 +147,6 @@ async function checkSecurity(rootPath) {
         }
     }
 
-    // 3. Permission allow-list checks (project settings)
     const settingsContent = await readFileSafe(resolve(rootPath, '.claude', 'settings.json'));
     if (settingsContent) {
         try {
@@ -176,20 +155,6 @@ async function checkSecurity(rootPath) {
                 const allowed = settings.permissions.allowedTools;
                 if (allowed.includes('*') || allowed.includes('Bash(*)')) {
                     findings.push({ category: 'security', severity: 'warning', message: 'allowedTools includes wildcard \u2014 all tools run without confirmation' });
-                }
-            }
-        } catch {}
-    }
-
-    // 4. User-level permission checks (~/.claude.json)
-    const userClaudeContent = await readFileSafe(join(home, '.claude.json'));
-    if (userClaudeContent) {
-        try {
-            const userSettings = JSON.parse(userClaudeContent);
-            const allowed = userSettings.permissions?.allow || [];
-            if (Array.isArray(allowed)) {
-                if (allowed.includes('*') || allowed.includes('Bash(*)')) {
-                    findings.push({ category: 'security', severity: 'warning', message: '~/.claude.json has wildcard permission allow \u2014 all tools run without confirmation globally' });
                 }
             }
         } catch {}

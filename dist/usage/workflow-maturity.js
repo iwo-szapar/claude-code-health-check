@@ -64,7 +64,7 @@ export async function checkWorkflowMaturity(rootPath) {
             message = `Skill usage log exists but has only ${lineCount} entries — use your /skills more to build a usage record`;
         } else {
             status = 'fail'; points = 0;
-            message = 'Skill usage is not being tracked — create memory/skill-usage.md and log which /skills you use and how often. Without this, you can\'t tell which skills are actually useful.';
+            message = 'No record of which commands you use and how often. Why it matters: without tracking, you can\'t see which automations actually save you time. Fix: create memory/skill-usage.md to start logging.';
         }
         checks.push({ name: 'Skill invocation evidence', status, points, maxPoints: 4, message });
     }
@@ -89,7 +89,7 @@ export async function checkWorkflowMaturity(rootPath) {
                 message = `No commands found but ${skillCount} skills exist — add .claude/commands/ to chain skills together into repeatable multi-step workflows`;
             } else {
                 status = 'fail'; points = 0;
-                message = 'No commands in .claude/commands/ — a command is a named workflow (like /morning-review) that Claude runs when you ask for it';
+                message = 'No multi-step automations set up yet. Why it matters: commands let you run complex workflows with a single /command (like /morning-review). Fix: add .claude/commands/ with your first workflow.';
             }
         }
         checks.push({ name: 'Command definitions', status, points, maxPoints: 3, message });
@@ -137,7 +137,7 @@ export async function checkWorkflowMaturity(rootPath) {
             message = `${skillNames.length} skills but all in the same area — branch out: add a content skill, a research skill, or an ops skill`;
         } else {
             status = 'fail'; points = 0;
-            message = 'Not enough skills to measure workflow coverage — add at least 3 skills covering different types of work you do';
+            message = 'Not enough automations to measure workflow coverage. Why it matters: the more types of work AI can help with, the more time you save. Fix: add at least 3 skills covering different areas (e.g. writing, coding, research).';
         }
         checks.push({ name: 'Workflow diversity', status, points, maxPoints: 3, message });
     }

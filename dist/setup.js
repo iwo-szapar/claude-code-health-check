@@ -438,8 +438,9 @@ export async function runSetup() {
 
     if (!token) {
         console.log('');
-        console.log('    Enter your token from the purchase email.');
+        console.log('    Enter your account token from the purchase email.');
         console.log(dim('    Press Enter to skip (free tier — health check only).'));
+        console.log(dim('    Get access: https://www.iwoszapar.com/second-brain-ai'));
         console.log('');
         const input = await ask(rl, '    Token: ');
         token = input.trim() || null;
@@ -449,6 +450,28 @@ export async function runSetup() {
     }
 
     const isPaid = !!token;
+
+    // ── Validate token against Factory (if paid) ──
+    if (isPaid) {
+        try {
+            const res = await fetch(`${REMOTE_MCP_URL.replace('/api/mcp', '/api/mcp/validate')}`, {
+                method: 'GET',
+                headers: { 'Authorization': `Bearer ${token}` },
+                signal: AbortSignal.timeout(5000),
+            });
+            if (res.ok) {
+                console.log(`    ${green('Token validated successfully.')}`);
+            } else if (res.status === 401) {
+                console.log(yellow('    Warning: Token is invalid or expired.'));
+                console.log(dim('    Check your purchase email or contact support.'));
+            } else {
+                console.log(dim('    Could not validate token (server unavailable). Continuing anyway.'));
+            }
+        } catch {
+            console.log(dim('    Could not reach validation server. Continuing with offline setup.'));
+        }
+    }
+
     console.log(`\n    ${bold('Tier:')} ${isPaid ? green('Guide (paid)') : dim('Free tier')}`);
 
     // ── Configuration ──
@@ -471,9 +494,22 @@ export async function runSetup() {
     if (isPaid) {
         try {
             saveTokenToSettings(token);
-            console.log(`    ${green('+')} SBF_TOKEN ${dim('saved')}`);
+            console.log(`    ${green('+')} Account configured ${dim('in .claude/settings.json')}`);
         } catch {
             console.log(`    ${yellow('~')} Token: ${dim('save manually: SBF_TOKEN=' + token)}`);
+        }
+
+        // ── .gitignore check ──
+        const gitignorePath = join(process.cwd(), '.gitignore');
+        if (existsSync(gitignorePath)) {
+            const gitignoreContent = readFileSync(gitignorePath, 'utf-8');
+            if (!gitignoreContent.includes('.claude/settings.json') && !gitignoreContent.includes('.claude/')) {
+                console.log(yellow('    Warning: .gitignore does not exclude .claude/settings.json'));
+                console.log(yellow('    Your token may be committed to git. Add this line to .gitignore:'));
+                console.log(dim('      .claude/settings.json'));
+            }
+        } else {
+            console.log(yellow('    Warning: No .gitignore found. Your token in .claude/settings.json may be committed to git.'));
         }
 
         const header = `Authorization: Bearer ${token}`;

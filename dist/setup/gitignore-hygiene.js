@@ -95,7 +95,7 @@ export async function checkGitignoreHygiene(rootPath) {
         let status, points, message;
         if (leaks.length > 0) {
             status = 'fail'; points = 0;
-            message = `Local-only files tracked in git: ${leaks.join(', ')} — these contain personal settings that should not be shared`;
+            message = `Personal settings files (${leaks.join(', ')}) are visible in your shared repository. Why it matters: anyone with repo access can see your private configuration. Fix: add these to .gitignore to keep them private.`;
         } else if (protected_.length > 0) {
             status = 'pass'; points = 3;
             message = `${protected_.length} local settings file(s) properly excluded from git`;
@@ -107,7 +107,7 @@ export async function checkGitignoreHygiene(rootPath) {
                 message = 'Gitignore patterns cover local settings files';
             } else {
                 status = 'warn'; points = 2;
-                message = 'No local settings files found and no gitignore patterns for them — add settings.local.json to .gitignore preemptively';
+                message = 'No personal settings files found yet. Tip: add settings.local.json to .gitignore now so future personal settings stay private automatically.';
             }
         }
         checks.push({ name: 'Local settings protection', status, points, maxPoints: 3, message });
@@ -132,7 +132,7 @@ export async function checkGitignoreHygiene(rootPath) {
         let status, points, message;
         if (leaks.length > 0) {
             status = 'fail'; points = 0;
-            message = `Environment files tracked in git: ${leaks.join(', ')} — these may contain API keys and secrets`;
+            message = `Secret files (${leaks.join(', ')}) are visible in your shared repository. Why it matters: these files often contain passwords, API keys, and tokens — anyone with repo access can see them. Fix: add .env* to .gitignore and rotate any exposed secrets.`;
         } else if (protected_.length > 0) {
             status = 'pass'; points = 3;
             message = `${protected_.length} environment file(s) properly excluded from git`;
@@ -143,7 +143,7 @@ export async function checkGitignoreHygiene(rootPath) {
                 message = 'Gitignore patterns cover environment files';
             } else {
                 status = 'warn'; points = 1;
-                message = 'No .env files found and no .env pattern in .gitignore — add .env* pattern preemptively';
+                message = 'No secret files (.env) found yet. Tip: add .env* to .gitignore now so future secrets stay private automatically.';
             }
         }
         checks.push({ name: 'Environment file protection', status, points, maxPoints: 3, message });
