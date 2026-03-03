@@ -1,4 +1,4 @@
-<h1 align="center">Claude Code Health Check For Your *AI Second Brain*</h1>
+<h1 align="center">Claude Code Health Check For Your AI Second Brain</h1>
 
 <p align="center">
 <strong>Your Claude Code setup has 45 things that could be better. This finds them in 2 seconds.</strong>
