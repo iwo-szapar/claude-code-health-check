@@ -250,7 +250,7 @@ export async function runUpgradeBrain(options = {}) {
     const existing_paths = globBrainFiles(brainRoot);
 
     // Phase 4-6: Call Factory endpoint
-    const endpoint = factory_url || 'https://www.iwoszapar.com/api/upgrade/generate';
+    const endpoint = factory_url || 'https://second-brain-factory.vercel.app/api/upgrade/generate';
     const token = api_key || process.env.UPGRADE_BRAIN_API_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
 
     if (!token) {

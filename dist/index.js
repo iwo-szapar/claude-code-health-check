@@ -545,7 +545,7 @@ server.registerTool('upgrade_brain', {
             .string()
             .url()
             .optional()
-            .describe('Override the Factory API URL. Default: https://www.iwoszapar.com/api/upgrade/generate'),
+            .describe('Override the Factory API URL. Default: https://second-brain-factory.vercel.app/api/upgrade/generate'),
         api_key: z
             .string()
             .optional()

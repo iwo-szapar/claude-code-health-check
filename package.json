@@ -1,6 +1,6 @@
 {
   "name": "second-brain-health-check",
-  "version": "0.14.6",
+  "version": "0.14.7",
   "description": "Context engineering quality scanner for Claude Code. Scores 45 check layers across CLAUDE.md, skills, hooks, memory, and planning artifacts — adaptive reports, CE pattern mapping, time estimates.",
   "type": "module",
   "main": "dist/index.js",
