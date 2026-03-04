@@ -10,7 +10,7 @@
  */
 import { VERSION } from '../version.js';
 
-const FACTORY_SCORES_URL = 'https://www.iwoszapar.com/api/health-check/submit';
+const FACTORY_SCORES_URL = 'https://second-brain-factory.vercel.app/api/health-check/submit';
 const PHONE_HOME_TIMEOUT_MS = 5000;
 
 /**
