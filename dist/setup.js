@@ -387,10 +387,11 @@ function readClaudeSettings() {
 }
 
 function findExistingToken() {
+    if (process.env.SBK_TOKEN) return process.env.SBK_TOKEN;
     if (process.env.SBF_TOKEN) return process.env.SBF_TOKEN;
     if (process.env.GUIDE_TOKEN) return process.env.GUIDE_TOKEN;
     const s = readClaudeSettings();
-    return s?.data?.env?.SBF_TOKEN || null;
+    return s?.data?.env?.SBK_TOKEN || s?.data?.env?.SBF_TOKEN || null;
 }
 
 function saveTokenToSettings(token) {
@@ -401,6 +402,8 @@ function saveTokenToSettings(token) {
         try { data = JSON.parse(readFileSync(settingsPath, 'utf-8')); } catch { /* fresh */ }
     }
     if (!data.env) data.env = {};
+    data.env.SBK_TOKEN = token;
+    // Keep SBF_TOKEN for backwards compatibility
     data.env.SBF_TOKEN = token;
     if (!existsSync(projectDir)) mkdirSync(projectDir, { recursive: true });
     writeFileSync(settingsPath, JSON.stringify(data, null, 2) + '\n');
@@ -446,6 +449,25 @@ function getNextSteps(profile, isPaid) {
 // ── Main Setup Flow ─────────────────────────────────────────────────────────
 
 export async function runSetup() {
+    // ── Non-interactive guard ──
+    // Raw mode TUI requires a real terminal. When Claude Code runs this via
+    // its Bash tool, stdin is piped and setRawMode() crashes (exit 13).
+    if (!process.stdin.isTTY) {
+        console.log('');
+        console.log('  This is an interactive setup wizard that requires a terminal.');
+        console.log('');
+        console.log('  Run it directly in your terminal (not through Claude Code):');
+        console.log('');
+        console.log('    npx second-brain-health-check setup');
+        console.log('');
+        console.log('  It will ask you to paste a token from a MemoryOS purchase email,');
+        console.log('  or press Enter for the free tier (4 tools).');
+        console.log('');
+        console.log('  Get MemoryOS: https://www.iwoszapar.com/memory-os');
+        console.log('');
+        process.exit(0);
+    }
+
     const rl = createInterface({ input: process.stdin, output: process.stdout });
 
     const { version } = JSON.parse(
@@ -551,7 +573,7 @@ export async function runSetup() {
             saveTokenToSettings(token);
             console.log(`    ${green('\u2713')} Token saved ${dim('to .claude/settings.json')}`);
         } catch {
-            console.log(`    ${yellow('\u26A0')} ${dim('Save manually: SBF_TOKEN=' + token)}`);
+            console.log(`    ${yellow('\u26A0')} ${dim('Save manually: SBK_TOKEN=' + token)}`);
         }
 
         // ── .gitignore check ──
@@ -577,6 +599,14 @@ export async function runSetup() {
             console.log(dim(`      claude mcp add ${REMOTE_MCP_NAME} --transport http --url ${REMOTE_MCP_URL}`));
         }
     }
+
+    // ── Restart reminder ──
+    console.log('');
+    console.log(box([
+        yellow('IMPORTANT') + white(': Restart Claude Code after setup completes.'),
+        white('Close this terminal and open a new one for the'),
+        white('MCP tools to become available.'),
+    ]));
 
     // ── Profile ──
     console.log(section('\u2462 Quick Profile', '3 questions to personalize your experience.'));
